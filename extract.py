@@ -47,6 +47,8 @@ def main(args):
   outputDir = os.path.abspath(output)
 
   images = []
+  imagesNumber = 0
+  
   for file in files:
     dir, path, mime, filename = file.values()
 
@@ -57,6 +59,8 @@ def main(args):
     if mime.startswith('video'):
       print('[INFO] extracting frames from video...')
       video = cv2.VideoCapture(path)
+      videoFps = video.get(cv2.CAP_PROP_FPS)
+      print("[INFO] framerate is {} per second".format(videoFps))
       while True:
         success, frame = video.read()
         if success and isinstance(frame, np.ndarray):
@@ -67,11 +71,41 @@ def main(args):
             "targetDir": targetDir,
             "filename": filename
           }
-          images.append(image)
+
+          imagesNumber = imagesNumber + 1;
+
+          if imagesNumber % videoFps == 0:
+            images.append(image)
+          else : 
+          
         else:
           break
       video.release()
       cv2.destroyAllWindows()
+
+      //iniziamo ad associare le immagini e ad eliminare quelle troppo simili tra loro - da sistemare
+      //images 
+        image = cv2.imread(args["image"])
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        boxes = face_recognition.face_locations(rgb, model=args["detection_method"])
+        encodings1 = face_recognition.face_encodings(rgb, boxes)
+        
+        # read 2nd image and store encodings
+        image = cv2.imread(args["image"])
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        boxes = face_recognition.face_locations(rgb, model=args["detection_method"])
+        encodings2 = face_recognition.face_encodings(rgb, boxes)
+        
+        
+        # now you can compare two encodings
+        # optionally you can pass threshold, by default it is 0.6
+        matches = face_recognition.compare_faces(encoding1, encoding2)
+      
+      //da sistemare 
+
+    
     elif mime.startswith('image'):
       image = {
         "file": cv2.imread(path),
