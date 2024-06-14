@@ -4,4 +4,7 @@ filetype
 numpy
 pytest
 tf-keras
-deepface
+cmake==3.25.2
+dlib==19.24.2
+face_recognition
+

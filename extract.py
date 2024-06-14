@@ -7,7 +7,34 @@ from pathlib import Path
 from PIL import Image
 from facedetector import FaceDetector
 
+import face_recognition
 
+def check_faces_in_folder(folder_path):
+    # Ottieni la lista dei file di immagine nella cartella
+    images = [f for f in os.listdir(folder_path) if f.endswith(('.jpg', '.jpeg', '.png'))]
+    detected_faces = []
+
+    for image_filename in images:
+        image_path = os.path.join(folder_path, image_filename)
+        try:
+            # Carica l'immagine usando face_recognition
+            image = face_recognition.load_image_file(image_path)
+            
+            # Rileva i volti nell'immagine
+            face_locations = face_recognition.face_locations(image)
+
+            if face_locations:
+                print(f"Volto(i) rilevato(i) in {image_filename}")
+                detected_faces.append(image_filename)
+            else:
+                print(f"Nessun volto rilevato in {image_filename}")
+
+        except Exception as e:
+            print(f"Errore nel processare {image_filename}: {e}")
+
+    return detected_faces
+    
+    
 def empty_folder(folder_path):
     if not os.path.exists(folder_path):
         print(f"La cartella {folder_path} non esiste.")
@@ -141,7 +168,9 @@ def main(args):
       total += 1
       j += 1
 
-  print("[INFO] found {} face(s)".format(total))
+  print("[INFO] found {} face(s) with facedetector".format(total))
+  detected_faces = check_faces_in_folder(outputDir)
+  print(f"Immagini con volti rilevati con face_recognition: {detected_faces}")
 
 
 if __name__ == "__main__":
