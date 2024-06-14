@@ -3,3 +3,5 @@ facedetector-py
 filetype
 numpy
 pytest
+tf-keras
+deepface

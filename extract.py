@@ -7,6 +7,24 @@ from pathlib import Path
 from PIL import Image
 from facedetector import FaceDetector
 
+
+def empty_folder(folder_path):
+    if not os.path.exists(folder_path):
+        print(f"La cartella {folder_path} non esiste.")
+        return
+
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print(f"Non sono riuscito a cancellare {file_path}. Ragione: {e}")
+
+    print(f"La cartella {folder_path} è stata svuotata.")
+    
 def getFiles(path):
   files = list()
   if os.path.isdir(path):
@@ -45,10 +63,11 @@ def main(args):
 
   inputDir = os.path.abspath(os.path.dirname(input)) if os.path.isfile(input) else os.path.abspath(input)
   outputDir = os.path.abspath(output)
-
-  images = []
-  imagesNumber = 0
   
+  empty_folder(outputDir)
+
+  
+  images = []
   for file in files:
     dir, path, mime, filename = file.values()
 
@@ -59,8 +78,6 @@ def main(args):
     if mime.startswith('video'):
       print('[INFO] extracting frames from video...')
       video = cv2.VideoCapture(path)
-      videoFps = video.get(cv2.CAP_PROP_FPS)
-      print("[INFO] framerate is {} per second".format(videoFps))
       while True:
         success, frame = video.read()
         if success and isinstance(frame, np.ndarray):
@@ -71,41 +88,11 @@ def main(args):
             "targetDir": targetDir,
             "filename": filename
           }
-
-          imagesNumber = imagesNumber + 1;
-
-          if imagesNumber % videoFps == 0:
-            images.append(image)
-          else : 
-          
+          images.append(image)
         else:
           break
       video.release()
       cv2.destroyAllWindows()
-
-      //iniziamo ad associare le immagini e ad eliminare quelle troppo simili tra loro - da sistemare
-      //images 
-        image = cv2.imread(args["image"])
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        boxes = face_recognition.face_locations(rgb, model=args["detection_method"])
-        encodings1 = face_recognition.face_encodings(rgb, boxes)
-        
-        # read 2nd image and store encodings
-        image = cv2.imread(args["image"])
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        boxes = face_recognition.face_locations(rgb, model=args["detection_method"])
-        encodings2 = face_recognition.face_encodings(rgb, boxes)
-        
-        
-        # now you can compare two encodings
-        # optionally you can pass threshold, by default it is 0.6
-        matches = face_recognition.compare_faces(encoding1, encoding2)
-      
-      //da sistemare 
-
-    
     elif mime.startswith('image'):
       image = {
         "file": cv2.imread(path),
