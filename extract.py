@@ -10,50 +10,109 @@ import face_recognition
 from collections import defaultdict  # Importa defaultdict da collections
 from skimage.metrics import structural_similarity as ssim
 from deepface import DeepFace
+import json
+
+
+def rename_files_from_duplicates(duplicates_json_path, folder_path):
+    # Carica il file JSON contenente i gruppi di duplicati
+    with open(duplicates_json_path, 'r') as f:
+        duplicates = json.load(f)
+    
+    # Contatore per numerare i file rinominati
+    count = 1
+
+    # Itera attraverso ogni gruppo di duplicati nel dizionario
+    for key, value_list in duplicates.items():
+        # Genera un nuovo nome per il gruppo di duplicati
+        new_name_prefix = f"Soggetto_{count}"
+        count += 1
+        
+        # Rinomina tutti i file nel gruppo di duplicati
+        for filename in [key] + value_list:
+            old_path = os.path.join(folder_path, filename)
+            new_filename = f"{new_name_prefix}_{count:02d}.jpg"  # Aggiungi l'estensione appropriata se necessario
+            new_path = os.path.join(folder_path, new_filename)
+            
+            try:
+                os.rename(old_path, new_path)
+                print(f"File rinominato: {filename} -> {new_filename}")
+            except Exception as e:
+                print(f"Errore durante la rinomina di {filename}: {e}")
+
+    print("Rinomina dei file completata.")
+
+
+def calculate_face_visibility(frame):
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    
+    total_face_area = 0
+    for (x, y, w, h) in faces:
+        total_face_area += w * h
+    
+    return total_face_area
+
+def calculate_image_quality(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+    variance = laplacian.var()
+    
+    return variance
+
+def get_best_frames_per_second(video_path):
+    video = cv2.VideoCapture(video_path)
+    frames_per_second = []
+    
+    frame_count = 0
+    while True:
+        # Imposta la posizione del video al frame del secondo successivo
+        video.set(cv2.CAP_PROP_POS_MSEC, (frame_count * 1000))
+        success, frame = video.read()
+
+        if not success:
+            break
+        
+        face_visibility = calculate_face_visibility(frame)
+        image_quality = calculate_image_quality(frame)
+        
+        frames_per_second.append((frame_count, frame, face_visibility, image_quality))
+        frame_count += 1
+    
+    video.release()
+    cv2.destroyAllWindows()
+    
+    # Filtra i frame per mantenere solo il migliore per ogni secondo
+    best_frames = {}
+    for frame_count, frame, face_visibility, image_quality in frames_per_second:
+        if frame_count not in best_frames or (face_visibility > best_frames[frame_count][1] or (face_visibility == best_frames[frame_count][1] and image_quality > best_frames[frame_count][2])):
+            best_frames[frame_count] = (frame, face_visibility, image_quality)
+    
+    return [best_frames[second][0] for second in sorted(best_frames)]
 
 def check_faces(files, inputDir, outputDir, padding):
     images = []
+    
     for file in files:
         dir, path, mime, filename = file.values()
-
         targetDir = os.path.join(outputDir, os.path.relpath(dir, inputDir))
-
+        
         if mime is None:
             continue
         
         if mime.startswith('video'):
-            print('[INFO] Estrazione fotogrammi dal video...')
+            print(f'[INFO] Extracting frames from video: {filename}')
+            best_frames = get_best_frames_per_second(path)
             
-            # Apri il file video
-            video = cv2.VideoCapture(path)
-            
-            # Lista per memorizzare le immagini estratte
-            images_from_video = []
-
-            while True:
-                # Leggi un fotogramma dal video
-                success, frame = video.read()
-                
-                # Verifica se la lettura del fotogramma è stata effettuata con successo e il fotogramma è un array numpy valido
-                if success and isinstance(frame, np.ndarray):
-                    # Crea un dizionario per memorizzare i dettagli del fotogramma
-                    image = {
-                        "file": frame,           # Dati del fotogramma
-                        "sourcePath": path,      # Percorso del file video sorgente
-                        "sourceType": "video",   # Tipo di sorgente
-                        "targetDir": targetDir,  # Cartella di destinazione per il salvataggio dei fotogrammi
-                        "filename": filename     # Nome del file per il fotogramma
-                    }
-                    # Aggiungi il dizionario alla lista immagini
-                    images_from_video.append(image)
-
-                else:
-                    break
-            
-            # Aggiungi tutte le immagini estratte dal video alla lista principale delle immagini
-            images.extend(images_from_video)
-            video.release()
-            cv2.destroyAllWindows()
+            for frame in best_frames:
+                image = {
+                    "file": frame,
+                    "sourcePath": path,
+                    "sourceType": "video",
+                    "targetDir": targetDir,
+                    "filename": filename
+                }
+                images.append(image)
         
         elif mime.startswith('image'):
             image = {
@@ -64,55 +123,51 @@ def check_faces(files, inputDir, outputDir, padding):
                 "filename": filename
             }
             images.append(image)
-
-    total = 0
+    
+    total_faces = 0
     for i, image in enumerate(images):
-        print(f"[INFO] Elaborazione immagine {i + 1}/{len(images)}")
+        print(f"[INFO] Processing image {i + 1}/{len(images)}")
         
-        # Rileva i volti nell'immagine utilizzando il face detector
-        faces = FaceDetector.detect(image["file"])
-
-        # Converti l'immagine da BGR a RGB per PIL
         array = cv2.cvtColor(image['file'], cv2.COLOR_BGR2RGB)
         img = Image.fromarray(array)
-
-        j = 1
-        for face in faces:
+        
+        faces = FaceDetector.detect(image["file"])
+        
+        for j, face in enumerate(faces):
             bbox = face['bounding_box']
             pivotX, pivotY = face['pivot']
             
-            # Calcola le coordinate del bounding box ritagliato con il padding
             left = pivotX - bbox['width'] / 2.0 * padding
             top = pivotY - bbox['height'] / 2.0 * padding
             right = pivotX + bbox['width'] / 2.0 * padding
             bottom = pivotY + bbox['height'] / 2.0 * padding
             
-            # Ritaglia l'immagine
             cropped = img.crop((left, top, right, bottom))
-
-            # Crea la cartella target se non esiste
-            if not os.path.exists(image['targetDir']):
-                os.makedirs(image['targetDir'])
             
-            # Crea il nome del file di destinazione
+            os.makedirs(image['targetDir'], exist_ok=True)
+            
             if image["sourceType"] == "video":
                 targetFilename = f'{image["filename"]}_{i:04d}_{j}.jpg'
             else:
                 targetFilename = f'{image["filename"]}_{j}.jpg'
-
+            
             outputPath = os.path.join(image['targetDir'], targetFilename)
-
-            # Salva l'immagine ritagliata
+            
             cropped.save(outputPath)
-            total += 1
-            j += 1
+            total_faces += 1
+    
+    print(f"[INFO] Found {total_faces} faces using the face detector")
 
-    print(f"[INFO] Trovati {total} volti con il face detector")
+
+
+
+
 
 def compare_faces_in_folder(folder_path):
     # Elenco dei modelli di riconoscimento supportati
-    #model_names = ['VGG-Face', 'Facenet', 'OpenFace', 'DeepID', 'ArcFace', 'Dlib']
-    model_names = ['Dlib']
+    model_names = ['Facenet512']
+    backends = ["opencv", "ssd", "dlib", "mtcnn", "retinaface"]
+    metrics = ["cosine", "euclidean", "euclidean_l2"]
 
     # Ottieni la lista dei file di immagine nella cartella
     images = [f for f in os.listdir(folder_path) if f.endswith(('.jpg', '.jpeg', '.png'))]
@@ -144,39 +199,42 @@ def compare_faces_in_folder(folder_path):
             duplicate_found = False
             for model in model_names:
                 try:
-                    result = DeepFace.verify(img1_path, img2_path, model_name=model, enforce_detection=False)
+                    result = DeepFace.verify(img1_path, img2_path, model_name=model, enforce_detection=True)
                     if result["verified"]:
-                        # Aggiungi collegamenti bidirezionali per garantire che tutte le relazioni siano tracciate
-                        if images[i] not in duplicates:
-                            duplicates[images[i]] = []
-                        if images[j] not in duplicates[images[i]]:
-                            duplicates[images[i]].append(images[j])
-                        
-                        if images[j] not in duplicates:
-                            duplicates[images[j]] = []
-                        if images[i] not in duplicates[images[j]]:
-                            duplicates[images[j]].append(images[i])
-                        
-                        # Stampa un messaggio quando viene trovata una corrispondenza
-                        print(f"Immagine {images[i]} è duplicata con {images[j]} usando il modello {model}")
-                        
                         duplicate_found = True
-                        break  # Esci dal ciclo una volta trovato un duplicato con questo modello
-                
+                        break  # Esci dal ciclo se uno dei modelli verifica la corrispondenza
+
                 except Exception as e:
                     print(f"Errore nel processare {img1_path} e {img2_path} con modello {model}: {e}")
+                    # Continua con il prossimo modello se si verifica un errore
 
-                # Aggiorna il contatore di confronti solo se non è stato trovato un duplicato
-                if not duplicate_found:
-                    comparison_count += 1
-                    progress_percentage = (comparison_count / total_comparisons) * 100
-                    print(f"Progresso: {progress_percentage:.2f}% completato ({comparison_count}/{total_comparisons} confronti)")
+            if duplicate_found:
+                # Aggiungi collegamenti bidirezionali per garantire che tutte le relazioni siano tracciate
+                if images[i] not in duplicates:
+                    duplicates[images[i]] = []
+                if images[j] not in duplicates[images[i]]:
+                    duplicates[images[i]].append(images[j])
+                
+                if images[j] not in duplicates:
+                    duplicates[images[j]] = []
+                if images[i] not in duplicates[images[j]]:
+                    duplicates[images[j]].append(images[i])
+                
+                # Stampa un messaggio quando viene trovata una corrispondenza
+                print(f"Immagine {images[i]} è duplicata con {images[j]} usando almeno un modello")
+
+            # Aggiorna il contatore di confronti
+            comparison_count += 1
+            progress_percentage = (comparison_count / total_comparisons) * 100
+            print(f"Progresso: {progress_percentage:.2f}% completato ({comparison_count}/{total_comparisons} confronti)")
 
     # Salva i risultati in un file JSON
     with open("duplicates.json", "w") as outfile:
         json.dump(duplicates, outfile, indent=4)
 
     print("Confronto delle immagini completato. Risultati salvati in duplicates.json.")
+
+
 
 
 def empty_folder(folder_path):
@@ -236,10 +294,13 @@ def main(args):
   outputDir = os.path.abspath(output)
   
 
-  #empty_folder(outputDir)
-  #check_faces(files, inputDir, outputDir, padding);
-  
+  empty_folder(outputDir)
+  check_faces(files, inputDir, outputDir, padding);
   compare_faces_in_folder(outputDir) 
+  #face_recognition(outputDir)
+  #json_file_path = "duplicates.json"  # Sostituisci con il percorso effettivo del tuo file JSON
+  #rename_files_from_duplicates(json_file_path, outputDir)
+
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
