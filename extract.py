@@ -13,6 +13,57 @@ from deepface import DeepFace
 import json
 import shutil
 
+import os
+import cv2
+from deepface import DeepFace
+
+def image_quality(image_path):
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    laplacian_var = cv2.Laplacian(image, cv2.CV_64F).var()
+    return laplacian_var
+
+def find_and_remove_low_quality_images(directory):
+    # Step 1: Load images and get their face embeddings
+    images = [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    embeddings = {}
+    
+    for img_path in images:
+        try:
+            embedding = DeepFace.represent(img_path, model_name='Facenet')[0]['embedding']
+            embeddings[img_path] = embedding
+        except Exception as e:
+            print(f"Error processing {img_path}: {e}")
+
+    # Step 2: Compare images and determine duplicates
+    removed_images = set()
+    image_paths = list(embeddings.keys())
+
+    for i in range(len(image_paths)):
+        img1_path = image_paths[i]
+        if img1_path in removed_images:
+            continue
+
+        for j in range(i + 1, len(image_paths)):
+            img2_path = image_paths[j]
+            if img2_path in removed_images:
+                continue
+
+            result = DeepFace.verify(img1_path, img2_path, model_name='Facenet', enforce_detection=False)
+            if result["verified"]:
+                quality1 = image_quality(img1_path)
+                quality2 = image_quality(img2_path)
+                if quality1 > quality2:
+                    os.remove(img2_path)
+                    removed_images.add(img2_path)
+                else:
+                    os.remove(img1_path)
+                    removed_images.add(img1_path)
+                    break
+
+# Utilizzo della funzione
+directory = "/path/to/your/image/directory"
+find_and_remove_low_quality_images(directory)
+
 
 def rename_files_from_duplicates(duplicates_json_path, folder_path):
     # Carica il file JSON contenente i gruppi di duplicati
