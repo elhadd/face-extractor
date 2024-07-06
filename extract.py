@@ -12,35 +12,7 @@ from skimage.metrics import structural_similarity as ssim
 from deepface import DeepFace
 import json
 import shutil
-
-
-def rename_files_from_duplicates(duplicates_json_path, folder_path):
-    # Carica il file JSON contenente i gruppi di duplicati
-    with open(duplicates_json_path, 'r') as f:
-        duplicates = json.load(f)
-    
-    # Contatore per numerare i file rinominati
-    count = 1
-
-    # Itera attraverso ogni gruppo di duplicati nel dizionario
-    for key, value_list in duplicates.items():
-        # Genera un nuovo nome per il gruppo di duplicati
-        new_name_prefix = f"Soggetto_{count}"
-        count += 1
-        
-        # Rinomina tutti i file nel gruppo di duplicati
-        for filename in [key] + value_list:
-            old_path = os.path.join(folder_path, filename)
-            new_filename = f"{new_name_prefix}_{count:02d}.jpg"  # Aggiungi l'estensione appropriata se necessario
-            new_path = os.path.join(folder_path, new_filename)
-            
-            try:
-                os.rename(old_path, new_path)
-                print(f"File rinominato: {filename} -> {new_filename}")
-            except Exception as e:
-                print(f"Errore durante la rinomina di {filename}: {e}")
-
-    print("Rinomina dei file completata.")
+from pathlib import Path
 
 
 def calculate_face_visibility(frame):
@@ -91,170 +63,160 @@ def get_best_frames_per_second(video_path):
     
     return [best_frames[second][0] for second in sorted(best_frames)]
 
-def check_faces(files, inputDir, outputDir, padding):
-    images = []
-    
+def check_faces_best(files, inputDir, outputDir, padding):
+    immagini = []
+
+    # Percorsi per le due sottocartelle
+    clear_output_dir = os.path.join(outputDir, 'output_clear')
+    masked_output_dir = os.path.join(outputDir, 'output_masked')
+
+    # Crea le cartelle se non esistono
+    os.makedirs(clear_output_dir, exist_ok=True)
+    os.makedirs(masked_output_dir, exist_ok=True)
+
     for file in files:
         dir, path, mime, filename = file.values()
-        targetDir = os.path.join(outputDir, os.path.relpath(dir, inputDir))
-        
+        relative_dir = os.path.relpath(dir, inputDir)
+        clear_target_dir = os.path.join(clear_output_dir, relative_dir)
+        masked_target_dir = os.path.join(masked_output_dir, relative_dir)
+
         if mime is None:
             continue
-        
+
         if mime.startswith('video'):
-            print(f'[INFO] Extracting frames from video: {filename}')
+            print(f'[INFO] Estrazione frame dal video: {filename}')
             best_frames = get_best_frames_per_second(path)
-            
-            for frame in best_frames:
+
+            for frame_index, frame in enumerate(best_frames):
                 image = {
-                    "file": frame,
+                    "file": frame,  # Utilizza direttamente il frame array
                     "sourcePath": path,
                     "sourceType": "video",
-                    "targetDir": targetDir,
-                    "filename": filename
+                    "clearTargetDir": clear_target_dir,
+                    "maskedTargetDir": masked_target_dir,
+                    "filename": filename,
+                    "frame_index": frame_index
                 }
-                images.append(image)
-        
+                immagini.append(image)
+
         elif mime.startswith('image'):
             image = {
                 "file": cv2.imread(path),
                 "sourcePath": path,
                 "sourceType": "image",
-                "targetDir": targetDir,
+                "clearTargetDir": clear_target_dir,
+                "maskedTargetDir": masked_target_dir,
                 "filename": filename
             }
-            images.append(image)
-    
+            immagini.append(image)
+
     total_faces = 0
-    for i, image in enumerate(images):
-        print(f"[INFO] Processing image {i + 1}/{len(images)}")
-        
+    for i, image in enumerate(immagini):
+        print(f"[INFO] Elaborazione immagine {i + 1}/{len(immagini)}")
+
         array = cv2.cvtColor(image['file'], cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(array)
-        
-        faces = FaceDetector.detect(image["file"])
-        
-        for j, face in enumerate(faces):
-            bbox = face['bounding_box']
-            pivotX, pivotY = face['pivot']
-            
-            left = pivotX - bbox['width'] / 2.0 * padding
-            top = pivotY - bbox['height'] / 2.0 * padding
-            right = pivotX + bbox['width'] / 2.0 * padding
-            bottom = pivotY + bbox['height'] / 2.0 * padding
-            
-            cropped = img.crop((left, top, right, bottom))
-            
-            os.makedirs(image['targetDir'], exist_ok=True)
-            
+
+        # Rileva volti usando face_recognition
+        face_locations = face_recognition.face_locations(array)
+
+        for j, (top, right, bottom, left) in enumerate(face_locations):
+            width = right - left
+            height = bottom - top
+            pivotX = left + width / 2
+            pivotY = top + height / 2
+
+            # Calcola il bounding box con padding dinamico
+            left = max(0, int(pivotX - width / 2.0 * (1 + padding)))
+            top = max(0, int(pivotY - height / 2.0 * (1 + padding)))
+            right = min(array.shape[1], int(pivotX + width / 2.0 * (1 + padding)))
+            bottom = min(array.shape[0], int(pivotY + height / 2.0 * (1 + padding)))
+
+            # Ritaglia la regione del volto
+            face_image = array[top:bottom, left:right]
+
+            # Converti array in immagine PIL per il salvataggio
+            face_pil_image = Image.fromarray(face_image)
+
+            os.makedirs(image['clearTargetDir'], exist_ok=True)
+            os.makedirs(image['maskedTargetDir'], exist_ok=True)
+
             if image["sourceType"] == "video":
-                targetFilename = f'{image["filename"]}_{i:04d}_{j}.jpg'
+                targetFilename = f'{image["filename"]}_frame_{image["frame_index"]:04d}_face_{j}.jpg'
+                maskedFilename = f'{image["filename"]}_frame_{image["frame_index"]:04d}_face_{j}_masked.jpg'
             else:
-                targetFilename = f'{image["filename"]}_{j}.jpg'
-            
-            outputPath = os.path.join(image['targetDir'], targetFilename)
-            
-            cropped.save(outputPath)
+                targetFilename = f'{image["filename"]}_face_{j}.jpg'
+                maskedFilename = f'{image["filename"]}_face_{j}_masked.jpg'
+
+            clearOutputPath = os.path.join(image['clearTargetDir'], targetFilename)
+            maskedOutputPath = os.path.join(image['maskedTargetDir'], maskedFilename)
+
+            # Salva l'immagine del volto
+            face_pil_image.save(clearOutputPath)
+
+            # Creare una copia dell'immagine originale per la mascheratura
+            masked_array = array.copy()
+
+            # Maschera i volti
+            for k, (mtop, mright, mbottom, mleft) in enumerate(face_locations):
+                if k != j:  # Maschera solo i volti diversi da quello corrente
+                    masked_array[mtop:mbottom, mleft:mright] = 0  # Imposta i pixel a nero
+
+            # Ritaglia la regione del volto dalla copia mascherata
+            masked_face_image = masked_array[top:bottom, left:right]
+
+            # Converti la copia mascherata in immagine PIL per il salvataggio
+            masked_face_pil_image = Image.fromarray(masked_face_image)
+
+            # Salva l'immagine del volto con maschera
+            masked_face_pil_image.save(maskedOutputPath)
+
             total_faces += 1
-    
-    print(f"[INFO] Found {total_faces} faces using the face detector")
 
+    print(f"[INFO] Trovati e ritagliati {total_faces} volti utilizzando il rilevatore di volti")
 
+def check_and_delete_files(base_directory):
+    masked_directory = os.path.join(base_directory, 'output_masked')
+    clear_directory = os.path.join(base_directory, 'output_clear')
 
+    for filename in os.listdir(masked_directory):
+        if filename.endswith('_masked.jpg') or filename.endswith('_masked.png'):
+            masked_image_path = os.path.join(masked_directory, filename)
+            
+            try:
+                # Load the masked image
+                image = face_recognition.load_image_file(masked_image_path)
+                face_locations = face_recognition.face_locations(image)
+                
+                # Check if exactly one face is found
+                if len(face_locations) == 1:
+                    print(f"Image '{filename}' is valid: contains exactly one face.")
+                    continue  # Proceed to next image
+                else:
+                    print(f"Image '{filename}' does not meet criteria: removing...")
+                    
+                    base_filename = os.path.splitext(filename)[0]  # Remove extension
+                    original_filename = base_filename.replace('_masked', '')  # Get non-_masked version
 
+                    # Remove masked image
+                    os.remove(masked_image_path)
+                    print(f"Removed '{filename}'.")
 
+                    # Remove non-masked image if exists in clear directory
+                    original_image_path_jpg = os.path.join(clear_directory, original_filename + '.jpg')
+                    original_image_path_png = os.path.join(clear_directory, original_filename + '.png')
 
-def compare_faces_in_folder(folder_path):
-    # Elenco dei modelli di riconoscimento supportati
-    model_names = [
-        "Facenet512"
-    ]
-    
-    # Ottieni la lista dei file di immagine nella cartella
-    images = [f for f in os.listdir(folder_path) if f.endswith(('.jpg', '.jpeg', '.png'))]
-    
-    # Crea una cartella per memorizzare le immagini organizzate
-    organized_folder_path = os.path.join(folder_path, "organized")
-    if not os.path.exists(organized_folder_path):
-        os.makedirs(organized_folder_path)
+                    if os.path.isfile(original_image_path_jpg):
+                        os.remove(original_image_path_jpg)
+                        print(f"Removed '{original_filename}.jpg'.")
 
-    # Funzione per trovare un nome univoco per la nuova cartella
-    def get_unique_folder_path(base_path):
-        index = 0
-        while True:
-            new_folder_path = os.path.join(base_path, f"person_{index}")
-            if not os.path.exists(new_folder_path):
-                return new_folder_path
-            index += 1
+                    if os.path.isfile(original_image_path_png):
+                        os.remove(original_image_path_png)
+                        print(f"Removed '{original_filename}.png'.")
 
-    for img in images:
-        img_path = os.path.join(folder_path, img)
-        if not os.path.isfile(img_path):
-            continue
+                    print("")
 
-        face_matched = False
-
-        # Scorri le cartelle già create per cercare corrispondenze
-        for person_folder in os.listdir(organized_folder_path):
-            person_folder_path = os.path.join(organized_folder_path, person_folder)
-            if not os.path.isdir(person_folder_path):
-                continue
-
-            for existing_img in os.listdir(person_folder_path):
-                existing_img_path = os.path.join(person_folder_path, existing_img)
-
-                duplicate_found = False
-                for model in model_names:
-                    try:
-                        result = DeepFace.verify(img_path, existing_img_path, model_name=model, enforce_detection=True)
-                        if result["verified"]:
-                            duplicate_found = True
-                            break  # Esci dal ciclo se uno dei modelli verifica la corrispondenza
-
-                    except Exception as e:
-                        print(f"Errore nel processare {img_path} e {existing_img_path} con modello {model}: {e}")
-                        # Continua con il prossimo modello se si verifica un errore
-
-                if duplicate_found:
-                    # Sposta l'immagine nella cartella della persona corrispondente
-                    shutil.move(img_path, person_folder_path)
-                    face_matched = True
-                    print(f"Immagine {img} è stata spostata nella cartella {person_folder}.")
-                    break
-
-            if face_matched:
-                break
-
-        if not face_matched:
-            # Crea una nuova cartella per il nuovo volto
-            new_person_folder = get_unique_folder_path(organized_folder_path)
-            os.makedirs(new_person_folder)
-            shutil.move(img_path, new_person_folder)
-            print(f"Immagine {img} non ha corrispondenze. Creata nuova cartella {new_person_folder}.")
-
-    print("Confronto delle immagini completato e immagini organizzate.")
-
-
-def is_face_recognized(image_path):
-    try:
-        # Attempt to detect and analyze faces in the image
-        analysis = DeepFace.analyze(img_path=image_path, actions=['age', 'gender', 'race', 'emotion'], enforce_detection=True)
-        return True if analysis else False
-    except:
-        # If any error occurs, return False
-        return False
-
-def delete_unrecognized_faces(folder_path):
-    for filename in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, filename)
-        # Check if the file is an image
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-            if not is_face_recognized(file_path):
-                print(f"No recognizable face detected in {filename}. Deleting the file.")
-                os.remove(file_path)
-            else:
-                print(f"Face recognized in {filename}. Keeping the file.")
-
+            except Exception as e:
+                print(f"Error processing '{filename}': {e}")
 
 def empty_folder(folder_path):
     if not os.path.exists(folder_path):
@@ -305,7 +267,8 @@ def getFiles(path):
 def main(args):
   input = args["input"]
   output = args["output"]
-  padding = float(args["padding"])
+  #padding = float(args["padding"])
+  padding = 2
 
   files = getFiles(args['input'])
 
@@ -313,13 +276,9 @@ def main(args):
   outputDir = os.path.abspath(output)
   
 
-  #empty_folder(outputDir)
-  #check_faces(files, inputDir, outputDir, padding);
-  #delete_unrecognized_faces(outputDir) 
-  compare_faces_in_folder(outputDir) 
-  #face_recognition(outputDir)
-  #json_file_path = "duplicates.json"  # Sostituisci con il percorso effettivo del tuo file JSON
-  #rename_files_from_duplicates(json_file_path, outputDir)
+  empty_folder(outputDir)
+  check_faces_best(files, inputDir, outputDir, padding)
+  check_and_delete_files(outputDir)
 
 
 if __name__ == "__main__":
