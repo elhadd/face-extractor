@@ -63,7 +63,7 @@ class MyApp(App):
         self.layout = BoxLayout(orientation='vertical')
 
         # Trova il percorso della cartella Download
-        download_path = self.get_download_path()
+        desktop_path = self.get_desktop_path()
 
         # FileChooser per selezionare video o immagini
         image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif']
@@ -75,13 +75,10 @@ class MyApp(App):
         for ext in video_extensions:
             filters.append(f'*{ext}')
 
-        self.file_chooser = FileChooserListView(size_hint=(1, 0.8), path=download_path, filters=filters)
+        self.file_chooser = FileChooserListView(size_hint=(1, 0.8), path=desktop_path, filters=filters)
         self.layout.add_widget(self.file_chooser)
 
-        # scan_face_button
-        self.scan_face_button = Button(text="Scannerizza Volti", size_hint=(1, None), height=50, background_color=(0.13, 0.59, 0.95, 1), color=(1, 1, 1, 1))
-        self.scan_face_button.bind(on_press=self.scanFaces)
-        self.layout.add_widget(self.scan_face_button)
+       
 
         # BoxLayout orizzontale per i due nuovi pulsanti
         button_layout = BoxLayout(orientation='horizontal', size_hint=(1, None), height=50)
@@ -92,14 +89,20 @@ class MyApp(App):
         button_layout.add_widget(self.button1)
 
         # Pulsante 2
-        self.button2 = Button(text="Informazioni", size_hint=(0.5, None), height=50)
-        self.button2.bind(on_press=self.informationTab)
-        button_layout.add_widget(self.button2)
+        self.scan_face_button = Button(text="Scannerizza Volti",  size_hint=(0.5, None), height=50)
+        self.scan_face_button.bind(on_press=self.scanFaces)
+        button_layout.add_widget(self.scan_face_button)
         
         # BoxLayout orizzontale per i due nuovi pulsanti
         button_layout2 = BoxLayout(orientation='horizontal', size_hint=(1, None), height=50)
-
+        
         # Pulsante 3
+        self.button2 = Button(text="Informazioni", size_hint=(0.5, None), height=50)
+        self.button2.bind(on_press=self.informationTab)
+        button_layout2.add_widget(self.button2)
+        
+       
+        # Pulsante 4
         self.button3 = Button(text="Seleziona Cartella Database", size_hint=(0.5, None), height=50)
         self.button3.bind(on_press=self.selectDatabaseFolder)
         button_layout2.add_widget(self.button3)
@@ -107,34 +110,31 @@ class MyApp(App):
         if self.database_folder_path:
             self.updateButtonLabel()  # Aggiorna il testo del pulsante se la path è già salvata
 
-        # Pulsante 4
-        self.button4 = Button(text="Seleziona Prestazioni", size_hint=(0.5, None), height=50)
-        self.button4.bind(on_press=self.selectAlgo)
-        button_layout2.add_widget(self.button4)
-
         self.layout.add_widget(button_layout)  # Aggiungi il button_layout al layout principale
         self.layout.add_widget(button_layout2)  # Aggiungi il button_layout al layout principale
 
         return self.layout
 
-    def get_download_path(self):
-        # Funzione per ottenere il percorso della cartella "Download" specifica del sistema operativo
-        user_profile = os.getenv('USERPROFILE')
+    def get_desktop_path(self):
+        # Ottieni il percorso della cartella "Desktop" specifica del sistema operativo
+        user_profile = os.path.expanduser('~')  # Ottieni la directory home dell'utente
+
         system = platform.system()  # Ottieni il nome del sistema operativo
         if system == 'Windows':
             # Windows
-            download_path = os.path.join(user_profile, 'Downloads')
+            desktop_path = os.path.join(user_profile, 'Desktop')
         elif system == 'Linux':
             # Linux
-            download_path = os.path.join(user_profile, 'Downloads')
+            desktop_path = os.path.join(user_profile, 'Desktop')
         elif system == 'Darwin':
             # macOS
-            download_path = os.path.join(user_profile, 'Downloads')
+            desktop_path = os.path.join(user_profile, 'Desktop')
         else:
-            # Default (usato solo come fallback)
-            download_path = user_profile
+            # Altro sistema operativo non gestito
+            print(f"Sistema operativo non supportato: {system}")
+            desktop_path = user_profile
 
-        return download_path
+        return desktop_path
 
     def scanFaces(self, instance):
         selected_item = self.file_chooser.selection and self.file_chooser.selection[0]
@@ -158,9 +158,10 @@ class MyApp(App):
 
                     self.empty_folder(outputDir)
                     self.check_faces_best(files, inputDir, outputDir, padding)
-                    #self.update_progress(50)
+
                     self.check_and_delete_files(outputDir)
-                    #self.update_progress(0)
+                    self.confronta_e_elimina_immagini(outputDir)
+
                     self.scan_face_button.disabled = False
                     self.button1.disabled = False  # Disabilita il pulsante durante l'elaborazione
                     self.button2.disabled = False  # Disabilita il pulsante durante l'elaborazione
@@ -216,11 +217,10 @@ class MyApp(App):
             self.button3.text = "Seleziona Cartella Database"
 #***************************************************************************************************************************************
         
-    def selectAlgo(self, instance):
-        print("Ricerca Volto dal Database non pronto...")
-        
     def searchFaces(self, instance):
-        print("Ricerca Volto dal Database non pronto...")
+        print("Ricerca Volto dal Database in corso...")
+        self.scanFaces()
+        
 
     def informationTab(self, instance):
         sm = ScreenManager()
@@ -339,8 +339,7 @@ class MyApp(App):
 
             array = cv2.cvtColor(image['file'], cv2.COLOR_BGR2RGB)
 
-            # Rileva volti usando deepface
-            detections = DeepFace.analyze(img_path=array, detector_backend = 'retinaface', enforce_detection=False)
+            detections = DeepFace.analyze(img_path=array, detector_backend='retinaface', enforce_detection=False)
 
             if isinstance(detections, list):
                 for j, detection in enumerate(detections):
@@ -351,16 +350,12 @@ class MyApp(App):
                     pivotX = left + width / 2
                     pivotY = top + height / 2
 
-                    # Calcola il bounding box con padding dinamico
                     left = max(0, int(pivotX - width / 2.0 * (1 + padding)))
                     top = max(0, int(pivotY - height / 2.0 * (1 + padding)))
                     right = min(array.shape[1], int(pivotX + width / 2.0 * (1 + padding)))
                     bottom = min(array.shape[0], int(pivotY + height / 2.0 * (1 + padding)))
 
-                    # Ritaglia la regione del volto
                     face_image = array[top:bottom, left:right]
-
-                    # Converti array in immagine PIL per il salvataggio
                     face_pil_image = Image.fromarray(face_image)
 
                     os.makedirs(image['clearTargetDir'], exist_ok=True)
@@ -376,27 +371,23 @@ class MyApp(App):
                     clearOutputPath = os.path.join(image['clearTargetDir'], targetFilename)
                     maskedOutputPath = os.path.join(image['maskedTargetDir'], maskedFilename)
 
-                    # Salva l'immagine del volto
                     face_pil_image.save(clearOutputPath)
 
-                    # Creare una copia dell'immagine originale per la mascheratura
                     masked_array = array.copy()
 
-                    # Maschera i volti
                     for k, other_detection in enumerate(detections):
-                        if k != j:  # Maschera solo i volti diversi da quello corrente
+                        if k != j:
                             other_face_area = other_detection['region']
                             mtop, mleft = other_face_area['y'], other_face_area['x']
                             mbottom, mright = mtop + other_face_area['h'], mleft + other_face_area['w']
-                            masked_array[mtop:mbottom, mleft:mright] = 0  # Imposta i pixel a nero
+                            
+                            # Creazione della maschera circolare
+                            center = (mleft + other_face_area['w'] // 2, mtop + other_face_area['h'] // 2)
+                            radius = int(min(other_face_area['w'], other_face_area['h']) / 2)
+                            cv2.circle(masked_array, center, radius, (0, 0, 0), -1)
 
-                    # Ritaglia la regione del volto dalla copia mascherata
                     masked_face_image = masked_array[top:bottom, left:right]
-
-                    # Converti la copia mascherata in immagine PIL per il salvataggio
                     masked_face_pil_image = Image.fromarray(masked_face_image)
-
-                    # Salva l'immagine del volto con maschera
                     masked_face_pil_image.save(maskedOutputPath)
 
                     total_faces += 1
@@ -432,6 +423,7 @@ class MyApp(App):
                         # Remove masked image
                         os.remove(masked_image_path)
                         print(f"Removed '{filename}'.")
+                        
 
                         # Remove non-masked image if exists in clear directory
                         original_image_path_jpg = os.path.join(clear_directory, original_filename + '.jpg')
@@ -449,6 +441,118 @@ class MyApp(App):
 
                 except Exception as e:
                     print(f"Error processing '{filename}': {e}")
+
+    def confronta_volto_deepface(self, file_immagine1, file_immagine2):
+        try:
+            # Verifica se entrambi i file immagine esistono
+            if not os.path.exists(file_immagine1) or not os.path.exists(file_immagine2):
+                print("Uno dei file immagine non esiste.")
+                return False  # Restituisce similarità nulla se uno dei file non esiste
+
+            # Confronta i volti e ottieni la distanza utilizzando RetinaFace come detector_backend
+            #detector_backend='opencv',
+            result = DeepFace.verify(img1_path=file_immagine1, img2_path=file_immagine2, detector_backend='retinaface', model_name='Facenet512')
+
+            # Calcola la similarità come complemento della distanza
+            return result['verified']
+
+        except Exception as e:
+            print(f"Errore durante il confronto dei volti con DeepFace: {str(e)}")
+            return False  # In caso di errore, restituisce una similarità nulla
+
+    def valuta_qualita_volto(self, file_immagine):
+        try:
+            # Carica l'immagine utilizzando OpenCV
+            img = cv2.imread(file_immagine)
+            
+            # Calcola il punteggio di qualità del volto utilizzando OpenCV
+            # In questo esempio, calcoliamo la somma della varianza dei canali BGR
+            score = cv2.Laplacian(img, cv2.CV_64F).var()
+            
+            return score
+
+        except Exception as e:
+            print(f"Errore durante la valutazione della qualità dell'immagine: {str(e)}")
+            return 0  # In caso di errore, restituisce un punteggio di qualità basso
+
+    def confronta_e_elimina_immagini(self, cartella_immagini):
+        masked_directory = os.path.join(cartella_immagini, 'output_masked')
+        clear_directory = os.path.join(cartella_immagini, 'output_clear')
+
+        try:
+            # Ottenere la lista di tutti i file immagine nella cartella masked
+            files = os.listdir(masked_directory)
+            image_paths = [os.path.join(masked_directory, file) for file in files if file.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+            i = 0
+            while i < len(image_paths):
+                img1_path = image_paths[i]
+                
+                j = i + 1
+                while j < len(image_paths):
+                    img2_path = image_paths[j]
+
+                    print(f"Confrontando immagini:\n{img1_path}\n{img2_path}")
+
+                    # Calcola la similarità tra le due immagini
+                    #verifyface = 
+                    #print(f"Similarità: {similarity_score}")  # Stampare la similarità qui
+
+                    # Se la similarità è superiore alla soglia di 0.6, considera le immagini come della stessa persona
+                    if self.confronta_volto_deepface(img1_path, img2_path):
+                        # Valuta la qualità dell'immagine
+                        score_img1 = self.valuta_qualita_volto(img1_path)
+                        score_img2 = self.valuta_qualita_volto(img2_path)
+
+                        # Mantieni l'immagine con la qualità più alta
+                        if score_img1 > score_img2:
+                            # Rimuovi img2 dalla cartella e dalla lista
+                            if os.path.exists(img2_path):
+                                os.remove(img2_path)
+                                print(f"Immagine eliminata: {img2_path}")
+                           
+                            
+                            base_filename = os.path.splitext(img2_path)[0]  # Remove extension
+                            #print(f"Immagine eliminata1: {base_filename}")
+                            original_filename = base_filename.replace('output_masked', 'output_clear')  # Get non-_masked version
+                            original_filename = original_filename.replace('_masked', '')  # Get non-_masked version
+                            # Remove non-masked image if exists in clear directory
+                            #print(f"Immagine eliminata2: {original_filename}")
+                            original_image_path_jpg = os.path.join(original_filename + '.jpg')
+                            #print(f"Immagine eliminata3: {original_image_path_jpg}")
+                            
+                            if os.path.exists(original_image_path_jpg):
+                                os.remove(original_image_path_jpg)
+                                print(f"Immagine eliminata: {original_image_path_jpg}")
+                              
+                                
+                        else:
+                            # Rimuovi img1 dalla cartella e dalla lista
+                            if os.path.exists(img1_path):
+                                os.remove(img1_path)
+                                print(f"Immagine eliminata: {img1_path}")
+                           
+                            
+                            base_filename = os.path.splitext(img1_path)[0]  # Remove extension
+                            original_filename = base_filename.replace('output_masked', 'output_clear')  # Get non-_masked version
+                            original_filename = original_filename.replace('_masked', '')  # Get non-_masked version
+                            # Remove non-masked image if exists in clear directory
+                            original_image_path_jpg = os.path.join(original_filename + '.jpg')
+                            
+                            if os.path.exists(original_image_path_jpg):
+                                os.remove(original_image_path_jpg)
+                                print(f"Immagine eliminata: {original_image_path_jpg}")
+                                
+                    else:
+                        j += 1
+                
+                i += 1
+
+            print("Eliminazione delle immagini duplicate completata.")
+
+        except Exception as e:
+            print(f"Errore durante il confronto e l'eliminazione delle immagini: {str(e)}")
+
 
     def empty_folder(self, folder_path):
         if not os.path.exists(folder_path):

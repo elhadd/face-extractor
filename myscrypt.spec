@@ -1,0 +1,11 @@
+a = Analysis(['your_script.py'],
+             pathex=['path/to/your/script'],
+             binaries=[],
+             datas=[],
+             hiddenimports=['tensorflow', 'keras', 'win32timezone'],
+             hookspath=[],
+             runtime_hooks=[],
+             excludes=[],
+             win_no_prefer_redirects=False,
+             win_private_assemblies=False,
+             cipher=block_cipher)
