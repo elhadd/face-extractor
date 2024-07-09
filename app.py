@@ -147,6 +147,7 @@ class MyApp(App):
                     self.scan_face_button.disabled = True  # Disabilita il pulsante durante l'elaborazione
                     self.button1.disabled = True  # Disabilita il pulsante durante l'elaborazione
                     self.button2.disabled = True  # Disabilita il pulsante durante l'elaborazione
+                    
                     input = selected_item
                     output = "output/"
                     padding = 2
@@ -210,6 +211,27 @@ class MyApp(App):
         except FileNotFoundError:
             self.database_folder_path = ""
     
+    def get_database_folder_path(self):
+        try:
+            # Apri la chiave di registro
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Software\\MyApp", 0, winreg.KEY_READ)
+            
+            # Ottieni il valore per la chiave di registro specificata
+            database_folder_path, _ = winreg.QueryValueEx(key, "DatabaseFolder")
+            
+            # Chiudi la chiave di registro
+            winreg.CloseKey(key)
+            
+            # Restituisci il valore ottenuto
+            return database_folder_path
+        except FileNotFoundError:
+            # Gestisci il caso in cui la chiave o il valore di registro non esistano
+            return ""
+        except Exception as e:
+            # Gestisci altre eccezioni potenziali e registra l'errore
+            logging.error(f"Si è verificato un errore durante il caricamento del percorso della cartella del database: {e}")
+            return ""
+            
     def updateButtonLabel(self):
         if self.database_folder_path:
             self.button3.text = f"Cartella Database: {os.path.basename(self.database_folder_path)}"
@@ -220,6 +242,8 @@ class MyApp(App):
     def searchFaces(self, instance):
         print("Ricerca Volto dal Database in corso...")
         self.scanFaces()
+        databaseFolder = self.get_database_folder_path()
+        
         
 
     def informationTab(self, instance):
