@@ -1,5 +1,13 @@
 #pyinstaller --hidden-import=win32timezone your_script.py
 
+import json
+
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.image import AsyncImage  # Usa AsyncImage invece di Image
+
+from kivy.uix.scrollview import ScrollView
+
+from kivy.core.window import Window
 
 import time
 
@@ -34,6 +42,7 @@ import os
 import winreg
 
 class InformationScreen(Screen):
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.create_layout()
@@ -59,6 +68,7 @@ class InformationScreen(Screen):
         self.add_widget(layout)
         
 class MyApp(App):
+
     def build(self):
         self.layout = BoxLayout(orientation='vertical')
 
@@ -241,9 +251,15 @@ class MyApp(App):
         
     def searchFaces(self, instance):
         print("Ricerca Volto dal Database in corso...")
-        self.scanFaces()
+        output = "output/"
+        outputDir = os.path.abspath(output)
+        masked_output_dir = os.path.join(outputDir, 'output_masked')
+        self.scanFaces(instance)
         databaseFolder = self.get_database_folder_path()
-        
+        self.compare_images_in_folders(databaseFolder,masked_output_dir)
+        json_file_path = 'result.json'  # Percorso del file JSON con i risultati
+        ImageComparerApp(json_file_path).run()
+    
         
 
     def informationTab(self, instance):
@@ -309,7 +325,50 @@ class MyApp(App):
                 best_frames[frame_count] = (frame, face_visibility, image_quality)
 
         return [best_frames[second][0] for second in sorted(best_frames)]
+    
+    def load_images_from_folder(self, folder):
+        images = []
+        for filename in os.listdir(folder):
+            img_path = os.path.join(folder, filename)
+            if os.path.isfile(img_path):
+                images.append(img_path)
+        return images
+    
+    def compare_images_in_folders(self, folder1, folder2, output_json='result.json'):
+        print(f"Caricamento immagini da {folder1}...")
+        images1 = self.load_images_from_folder(folder1)
+        print(f"Caricamento immagini da {folder2}...")
+        images2 = self.load_images_from_folder(folder2)
+        results = []
 
+        print("Inizio confronto immagini...")
+        for img1 in images1:
+            for img2 in images2:
+                try:
+                    # Utilizza DeepFace per verificare se i volti nelle due immagini sono della stessa persona
+                    print(f"Confronto {img1} con {img2}...")
+                    result = DeepFace.verify(img1, img2)
+                    similarity = result['distance']
+                    is_same_person = result['verified']
+
+                    if is_same_person:
+                        # Aggiungi i risultati alla lista
+                        results.append({
+                            'image1': img1,
+                            'image2': img2,
+                            'similarity': similarity
+                        })
+                        print(f"Trovata corrispondenza: {img1} e {img2} con similarità {similarity}")
+
+                except Exception as e:
+                    print(f"Errore nel confronto tra {img1} e {img2}: {str(e)}")
+                    continue
+
+        # Salva i risultati in un file JSON nella stessa cartella del programma
+        with open(output_json, 'w') as json_file:
+            json.dump(results, json_file, indent=4)
+        print(f"Risultati salvati in {output_json}")
+    
     def check_faces_best(self, files, inputDir, outputDir, padding):
         immagini = []
 
@@ -624,6 +683,59 @@ class MyApp(App):
 
         return files
 
+class ImageComparer:
+    def __init__(self, json_file):
+        self.json_file = json_file
 
+    def load_results(self):
+        try:
+            with open(self.json_file, 'r') as file:
+                results = json.load(file)
+            return results
+        except FileNotFoundError:
+            print(f"File {self.json_file} non trovato.")
+            return []
+
+class ImageGrid(BoxLayout):
+
+    def __init__(self, results, **kwargs):
+        super(ImageGrid, self).__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.spacing = 10
+        self.padding = 10
+
+        scrollview = ScrollView(size_hint=(1, None), size=(Window.width, Window.height))
+        grid = GridLayout(cols=3, spacing=10, size_hint_y=None)
+        grid.bind(minimum_height=grid.setter('height'))
+
+        for result in results:
+            img1_path = result['image1']
+            img2_path = result['image2']
+            similarity = result['similarity']
+            similarity_percentage = (1 - similarity) * 100  # Converti la distanza in percentuale di somiglianza
+
+            img1 = AsyncImage(source=img1_path, size_hint_y=None, height=200)
+            img2 = AsyncImage(source=img2_path, size_hint_y=None, height=200)
+            label = Label(text=f"Somiglianza: {similarity_percentage:.2f}%\nValore: {similarity:.4f}", size_hint_y=None, height=200)
+
+            grid.add_widget(img1)
+            grid.add_widget(img2)
+            grid.add_widget(label)
+
+        scrollview.add_widget(grid)
+        self.add_widget(scrollview)
+
+class ImageComparerApp(App):
+    def __init__(self, json_file, **kwargs):
+        super(ImageComparerApp, self).__init__(**kwargs)
+        self.json_file = json_file
+
+    def build(self):
+        results_loader = ImageComparer(self.json_file)
+        results = results_loader.load_results()
+        return ImageGrid(results)
+        
+        
+        
 if __name__ == '__main__':
     MyApp().run()
